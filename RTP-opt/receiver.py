@@ -1,91 +1,63 @@
-"""RTP receiver (optimized version): buffers out-of-order packets and ACKs
-each packet individually with its own seq_num (no cumulative ACK)."""
-
 import argparse
 import socket
 import sys
 
 from utils import PacketHeader, compute_checksum
 
-# Packet types
 START, END, DATA, ACK = 0, 1, 2, 3
 
-HEADER_LEN = 16
 
-
-def parse_packet(raw):
-    """Return (header, payload) if the packet is well-formed and its checksum
-    matches, otherwise None (the packet must then be dropped silently)."""
-    if len(raw) < HEADER_LEN:
-        return None
-    header = PacketHeader(raw[:HEADER_LEN])
-    payload = raw[HEADER_LEN:HEADER_LEN + header.length]
-    if len(payload) != header.length:
-        return None
-    received = header.checksum
-    header.checksum = 0
-    if compute_checksum(header / payload) != received:
-        return None
-    return header, payload
-
-
-def send_ack(sock, seq, addr):
-    header = PacketHeader(type=ACK, seq_num=seq, length=0, checksum=0)
-    header.checksum = compute_checksum(header)
-    sock.sendto(bytes(header), addr)
+def send_ack(s, seq, addr):
+    h = PacketHeader(type=ACK, seq_num=seq, length=0)
+    h.checksum = compute_checksum(h)
+    s.sendto(bytes(h), addr)
 
 
 def receiver(receiver_ip, receiver_port, window_size):
     """Listen on socket and print received message to sys.stdout."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((receiver_ip, receiver_port))
-    out = sys.stdout.buffer
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind((receiver_ip, receiver_port))
 
-    connected = False
-    expected = 0    # next in-order seq_num (N)
-    buffer = {}     # seq_num -> payload, for packets inside the window
+    started = False
+    expected = 0
+    buf = {}
 
     while True:
-        raw, addr = sock.recvfrom(2048)
-        parsed = parse_packet(raw)
-        if parsed is None:
-            continue  # corrupted: drop without ACK
-        header, payload = parsed
-        ptype, seq = header.type, header.seq_num
+        pkt, addr = s.recvfrom(2048)
+        if len(pkt) < 16:
+            continue
+        h = PacketHeader(pkt[:16])
+        data = pkt[16:16 + h.length]
+        c = h.checksum
+        h.checksum = 0
+        if len(data) != h.length or compute_checksum(h / data) != c:
+            continue
 
-        if not connected:
-            # Only a START packet can open a connection
-            if ptype == START and seq == 0:
-                connected = True
+        if not started:
+            if h.type == START:
+                started = True
                 expected = 1
-                send_ack(sock, expected, addr)
+                send_ack(s, 1, addr)
             continue
 
-        if ptype == START:
-            # START in the middle of a connection is ignored
-            continue
-
-        if ptype == DATA:
+        if h.type == DATA:
+            seq = h.seq_num
             if seq >= expected + window_size:
-                continue  # beyond the window: drop, no ACK
+                continue
             if seq >= expected:
-                buffer.setdefault(seq, payload)
-                # Deliver every in-order packet we now have
-                while expected in buffer:
-                    out.write(buffer.pop(expected))
+                buf[seq] = data
+                while expected in buf:
+                    sys.stdout.buffer.write(buf.pop(expected))
                     expected += 1
-                out.flush()
-            # ACK exactly this packet's seq_num (also for duplicates below
-            # the window, so a lost ACK can be repaired)
-            send_ack(sock, seq, addr)
-
-        elif ptype == END and seq == expected:
-            # All data has been delivered; ACK the END and finish
-            send_ack(sock, seq, addr)
+                sys.stdout.flush()
+            # ack dung seq cua goi (khong cong don)
+            send_ack(s, seq, addr)
+        elif h.type == END and h.seq_num == expected:
+            send_ack(s, expected, addr)
             break
 
-    out.flush()
-    sock.close()
+    sys.stdout.flush()
+    s.close()
 
 
 def main():
