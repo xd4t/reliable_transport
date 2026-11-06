@@ -23,6 +23,8 @@ def get_ack(s, until):
             pkt, _ = s.recvfrom(2048)
         except socket.timeout:
             return None
+        except OSError:
+            continue
         if len(pkt) < 16:
             continue
         h = PacketHeader(pkt[:16])
@@ -72,11 +74,12 @@ def sender(receiver_ip, receiver_port, window_size):
                     base += 1
                 timer = time.time() + TIMEOUT
 
-    s.sendto(make_packet(END, n + 1), addr)
+    # cho ACK cua END toi da 500ms, gui lai END moi 100ms phong khi bi mat
+    end_pkt = make_packet(END, n + 1)
     end_time = time.time() + TIMEOUT
-    while True:
-        ack = get_ack(s, end_time)
-        if ack is None or ack == n + 1:
+    while time.time() < end_time:
+        s.sendto(end_pkt, addr)
+        if get_ack(s, min(end_time, time.time() + 0.1)) == n + 1:
             break
     s.close()
 

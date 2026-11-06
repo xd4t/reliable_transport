@@ -15,7 +15,7 @@ Dự án cài đặt giao thức truyền tin cậy RTP (Reliable Transport Prot
 Mỗi gói gồm header 16 byte (`type`, `seq_num`, `length`, `checksum` CRC32) và tối đa 1456 byte dữ liệu (1472 - 16), để vừa một gói UDP.
 
 ### RTP-base (Go-Back-N, ACK cộng dồn)
-- **Kết nối:** sender gửi `START` (seq 0) và chờ ACK seq 1. Sau khi gửi hết dữ liệu, sender gửi `END` và chờ ACK tối đa 500ms rồi thoát.
+- **Kết nối:** sender gửi `START` (seq 0) và chờ ACK seq 1. Sau khi gửi hết dữ liệu, sender gửi `END` và chờ ACK tối đa 500ms rồi thoát (trong 500ms này gửi lại `END` mỗi 100ms phòng khi gói bị mất).
 - **Sender:** chia dữ liệu thành các gói `DATA` đánh số từ 1 và gửi theo cửa sổ trượt kích thước `window_size`. Khi nhận ACK lớn hơn `base`, cửa sổ trượt tới và timer được đặt lại. Nếu quá 500ms mà cửa sổ không tiến, gửi lại toàn bộ gói trong cửa sổ.
 - **Receiver:** kiểm tra checksum, bỏ gói hỏng (không ACK). Gói nằm trong cửa sổ `[N, N + window_size)` được lưu đệm, kể cả gói đến sai thứ tự. Các gói liên tiếp được ghi ra stdout, sau đó receiver gửi ACK cộng dồn với seq của gói tiếp theo đang chờ.
 
